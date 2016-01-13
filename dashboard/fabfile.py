@@ -9,7 +9,7 @@ system_packages = ("git python-pip nginx libcairo2-dev python-cairo libffi-dev "
                    "uwsgi-plugin-python python-psycopg2")
 
 env.hosts = ['dashboard']
-env.dir = "/usr/local/graphite"
+env.dir = "/home/ubuntu/graphite"
 env.activate = "source "+env.dir+"/bin/activate"
 env.use_ssh_config = True
 
@@ -23,7 +23,7 @@ def virtualenv():
 
 def install_system_packages():
     sudo("apt-get update")
-    sudo("apt-get install %s" % system_packages)
+    sudo("apt-get -y install %s" % system_packages)
 
 
 def create_virtualenv():
@@ -97,7 +97,7 @@ def config_graphite():
         run("cp -f conf/graphite.wsgi.example conf/graphite.wsgi")
     put("../conf/graphite/*.conf", "%s/conf/" % env.dir)
     put("../conf/graphite/local_settings.py", "%s/webapp/graphite/" % env.dir)
-    run("echo 'GRAPHITE_ROOT = %(dir)s' >> "
+    run("echo 'GRAPHITE_ROOT = \"%(dir)s\"' >> "
         "%(dir)s/webapp/graphite/local_settings.py" % {'dir': env.dir})
     sudo("chown -R www-data:www-data graphite/storage/")
 
@@ -126,6 +126,10 @@ def restart_statsd():
     sudo("service statsd restart")
 
 
+def restart_grafana():
+    sudo("service grafana-server restart")
+
+
 def config_webserver():
     put("../conf/nginx/graphite", "/etc/nginx/sites-available/", use_sudo=True)
     put("../conf/nginx/grafana", "/etc/nginx/sites-available/", use_sudo=True)
@@ -151,4 +155,3 @@ def config_webserver():
 def restart_webserver():
     sudo("service uwsgi restart")
     sudo("service nginx restart")
-    sudo("service grafana-server restart")
