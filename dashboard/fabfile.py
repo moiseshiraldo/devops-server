@@ -1,4 +1,4 @@
-from fabric.api import run, sudo, env, cd, prefix, put
+from fabric.api import run, sudo, env, cd, prefix, put, upload_template
 from fabric.contrib import files
 from contextlib import contextmanager as customcontextmanager
 
@@ -96,9 +96,11 @@ def config_graphite():
         run("cp -f conf/carbon.conf.example conf/carbon.conf")
         run("cp -f conf/graphite.wsgi.example conf/graphite.wsgi")
     put("../conf/graphite/*.conf", "%s/conf/" % env.dir)
-    put("../conf/graphite/local_settings.py", "%s/webapp/graphite/" % env.dir)
-    run("echo 'GRAPHITE_ROOT = \"%(dir)s\"' >> "
-        "%(dir)s/webapp/graphite/local_settings.py" % {'dir': env.dir})
+    upload_template(
+        "../conf/graphite/local_settings.py",
+        "%s/webapp/graphite/" % env.dir,
+        context={'dir': env.dir},
+    )
     sudo("chown -R www-data:www-data graphite/storage/")
 
 
@@ -140,12 +142,12 @@ def config_webserver():
         sudo("ln -s /etc/nginx/sites-available/grafana "
              "/etc/nginx/sites-enabled/")
     sudo("rm -f /etc/nginx/sites-enabled/default")
-    put("../conf/uwsgi/graphite.ini", "/etc/uwsgi/apps-available/",
-        use_sudo=True)
-    sudo("echo 'chdir = %s/webapp' >> "
-         "/etc/uwsgi/apps-available/graphite.ini" % env.dir)
-    sudo("echo 'pythonpath = %s/lib/python2.7/site-packages' >> "
-         "/etc/uwsgi/apps-available/graphite.ini" % env.dir)
+    upload_template(
+        "../conf/uwsgi/graphite.ini",
+        "/etc/uwsgi/apps-available/",
+        context={'dir': env.dir},
+        use_sudo=True,
+    )
     if not files.exists("/etc/uwsgi/apps-enabled/graphite.ini"):
         sudo("ln -s /etc/uwsgi/apps-available/graphite.ini "
              "/etc/uwsgi/apps-enabled/")

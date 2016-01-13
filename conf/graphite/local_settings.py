@@ -1,6 +1,7 @@
+GRAPHITE_ROOT = %(dir)s
 TIME_ZONE = 'UTC'
 STATIC_URL = '/static/'
-STATIC_ROOT = '${GRAPHITE_ROOT}/static'
+STATIC_ROOT = '%(dir)s/static'
 URL_PREFIX = ''
 
 DATABASES = {

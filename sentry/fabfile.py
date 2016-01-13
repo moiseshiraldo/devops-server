@@ -1,4 +1,4 @@
-from fabric.api import run, sudo, env, cd, prefix, put
+from fabric.api import run, sudo, env, cd, prefix, put, upload_template
 from fabric.contrib import files
 from contextlib import contextmanager as customcontextmanager
 
@@ -79,14 +79,12 @@ def create_user():
 
 
 def config_supervisor():
-    put("../conf/supervisor/sentry.conf", "/etc/supervisor/conf.d/",
-        use_sudo=True)
-    sudo("echo 'directory=%s' >> "
-         "/etc/supervisor/conf.d/sentry.conf" % env.dir)
-    sudo("echo 'environment=SENTRY_CONF=\"%s/conf/sentry.conf.py\"' >> "
-         "/etc/supervisor/conf.d/sentry.conf" % env.dir)
-    sudo("echo 'command=%s/bin/sentry celery worker -B' >> "
-         "/etc/supervisor/conf.d/sentry.conf" % env.dir)
+    upload_template(
+        "../conf/supervisor/sentry.conf",
+        "/etc/supervisor/conf.d/",
+        context={'dir': env.dir},
+        use_sudo=True,
+    )
     sudo("service supervisor restart")
 
 
@@ -98,12 +96,12 @@ def config_webserver():
     sudo("rm -f /etc/nginx/sites-enabled/default")
     put("../conf/uwsgi/sentry.ini", "/etc/uwsgi/apps-available/",
         use_sudo=True)
-    sudo("echo 'env = SENTRY_CONF=%s/conf/sentry.conf.py' >> "
-         "/etc/uwsgi/apps-available/sentry.ini" % env.dir)
-    sudo("echo 'virtualenv=%s' >> "
-         "/etc/uwsgi/apps-available/sentry.ini" % env.dir)
-    #sudo("echo 'mount = /sentry=path/to/sentrywsgi.py' >> "
-    #     "/etc/uwsgi/apps-available/graphite.ini" % env.dir)
+    upload_template(
+        "../conf/uwsgi/sentry.ini",
+        "/etc/uwsgi/apps-available/",
+        context={'dir': env.dir},
+        use_sudo=True,
+    )
     if not files.exists("/etc/uwsgi/apps-enabled/sentry.ini"):
         sudo("ln -s /etc/uwsgi/apps-available/sentry.ini "
              "/etc/uwsgi/apps-enabled/")
