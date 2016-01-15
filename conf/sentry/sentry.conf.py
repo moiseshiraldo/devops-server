@@ -153,6 +153,7 @@ SENTRY_FILESTORE_OPTIONS = {
 # you need to uncomment and set it to the path where Sentry is hosted.
 #FORCE_SCRIPT_NAME = '/sentry'
 
+ALLOWED_HOSTS = ['*']
 SENTRY_WEB_HOST = '0.0.0.0'
 SENTRY_WEB_PORT = 9000
 SENTRY_WEB_OPTIONS = {

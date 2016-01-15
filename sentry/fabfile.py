@@ -1,16 +1,21 @@
-from fabric.api import run, sudo, env, cd, prefix, put, upload_template
+from fabric.api import run, sudo, env, cd, prefix, put
 from fabric.contrib import files
 from contextlib import contextmanager as customcontextmanager
+
+import sys
+sys.path.append('../')
+from settings import HOSTS, USER, SSH_CONFIG, SENTRY_DIR
 
 system_packages = ("python-virtualenv python-pip python-setuptools python-dev "
                    "libxslt1-dev libxml2-dev libz-dev libffi-dev libssl-dev "
                    "libpq-dev libyaml-dev postgresql-contrib supervisor "
                    "redis-server nginx uwsgi uwsgi-plugin-python git")
 
-env.hosts = ['dashboard']
-env.dir = "/home/ubuntu/sentry"
+env.hosts = HOSTS
+env.user = USER
+env.dir = SENTRY_DIR
 env.activate = "source "+env.dir+"/bin/activate"
-env.use_ssh_config = True
+env.use_ssh_config = SSH_CONFIG
 
 
 @customcontextmanager
@@ -21,7 +26,7 @@ def virtualenv():
 
 
 def install_system_packages():
-    sudo("apt-add-repository ppa:chris-lea/redis-server")
+    sudo("apt-add-repository -y ppa:chris-lea/redis-server")
     sudo("apt-get update")
     sudo("apt-get -y install %s" % system_packages)
 
@@ -63,7 +68,7 @@ def create_db():
          user="postgres")
 
 def config_db():
-    put("../conf/postgresql/pg_hba.cong", "/etc/postgresql/*/main/",
+    put("../conf/postgresql/pg_hba.conf", "/etc/postgresql/9.3/main/",
         use_sudo=True)
     sudo("service postgresql restart")
 
@@ -79,24 +84,26 @@ def create_user():
 
 
 def config_supervisor():
-    upload_template(
+    files.upload_template(
         "../conf/supervisor/sentry.conf",
         "/etc/supervisor/conf.d/",
-        context={'dir': env.dir},
+        context={'dir': env.dir, 'user': env.user},
         use_sudo=True,
     )
     sudo("service supervisor restart")
 
 
 def config_webserver():
-    put("../conf/nginx/sentry", "/etc/nginx/sites-available/", use_sudo=True)
-    if not files.exists("/etc/nginx/sites-enabled/sentry"):
-        sudo("ln -s /etc/nginx/sites-available/sentry "
+    put("../conf/nginx/location-sentry", "/etc/nginx/sites-available/",
+        use_sudo=True)
+    put("../conf/nginx/server", "/etc/nginx/sites-available/", use_sudo=True)
+    if not files.exists("/etc/nginx/sites-enabled/server"):
+        sudo("ln -s /etc/nginx/sites-available/server "
              "/etc/nginx/sites-enabled/")
     sudo("rm -f /etc/nginx/sites-enabled/default")
     put("../conf/uwsgi/sentry.ini", "/etc/uwsgi/apps-available/",
         use_sudo=True)
-    upload_template(
+    files.upload_template(
         "../conf/uwsgi/sentry.ini",
         "/etc/uwsgi/apps-available/",
         context={'dir': env.dir},

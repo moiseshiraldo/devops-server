@@ -1,6 +1,10 @@
-from fabric.api import run, sudo, env, cd, prefix, put, upload_template
+from fabric.api import run, sudo, env, cd, prefix, put
 from fabric.contrib import files
 from contextlib import contextmanager as customcontextmanager
+
+import sys
+sys.path.append('../')
+from settings import HOSTS, USER, SSH_CONFIG, GRAPHITE_DIR
 
 system_packages = ("git python-pip nginx libcairo2-dev python-cairo libffi-dev "
                    "libssl-dev libboost-python-dev fontconfig postgresql "
@@ -8,10 +12,11 @@ system_packages = ("git python-pip nginx libcairo2-dev python-cairo libffi-dev "
                    "nodejs npm devscripts debhelper python-virtualenv uwsgi "
                    "uwsgi-plugin-python python-psycopg2")
 
-env.hosts = ['dashboard']
-env.dir = "/home/ubuntu/graphite"
+env.hosts = HOSTS
+env.user = USER
+env.dir = GRAPHITE_DIR
 env.activate = "source "+env.dir+"/bin/activate"
-env.use_ssh_config = True
+env.use_ssh_config = SSH_CONFIG
 
 
 @customcontextmanager
@@ -96,7 +101,7 @@ def config_graphite():
         run("cp -f conf/carbon.conf.example conf/carbon.conf")
         run("cp -f conf/graphite.wsgi.example conf/graphite.wsgi")
     put("../conf/graphite/*.conf", "%s/conf/" % env.dir)
-    upload_template(
+    files.upload_template(
         "../conf/graphite/local_settings.py",
         "%s/webapp/graphite/" % env.dir,
         context={'dir': env.dir},
@@ -134,15 +139,17 @@ def restart_grafana():
 
 def config_webserver():
     put("../conf/nginx/graphite", "/etc/nginx/sites-available/", use_sudo=True)
-    put("../conf/nginx/grafana", "/etc/nginx/sites-available/", use_sudo=True)
+    put("../conf/nginx/location-grafana", "/etc/nginx/sites-available/",
+        use_sudo=True)
+    put("../conf/nginx/server", "/etc/nginx/sites-available/", use_sudo=True)
     if not files.exists("/etc/nginx/sites-enabled/graphite"):
         sudo("ln -s /etc/nginx/sites-available/graphite "
              "/etc/nginx/sites-enabled/")
-    if not files.exists("/etc/nginx/sites-enabled/grafana"):
-        sudo("ln -s /etc/nginx/sites-available/grafana "
+    if not files.exists("/etc/nginx/sites-enabled/server"):
+        sudo("ln -s /etc/nginx/sites-available/server "
              "/etc/nginx/sites-enabled/")
     sudo("rm -f /etc/nginx/sites-enabled/default")
-    upload_template(
+    files.upload_template(
         "../conf/uwsgi/graphite.ini",
         "/etc/uwsgi/apps-available/",
         context={'dir': env.dir},

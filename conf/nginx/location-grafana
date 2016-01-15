@@ -1,0 +1,8 @@
+location /grafana {
+	proxy_pass         http://localhost:3000;
+	rewrite  ^/grafana/(.*)  /$1 break;
+	proxy_set_header   Host $host;
+	access_log /var/log/nginx/grafana.access.log;
+	error_log /var/log/nginx/grafana.error.log;
+}
+ 

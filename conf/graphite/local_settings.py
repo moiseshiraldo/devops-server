@@ -1,4 +1,4 @@
-GRAPHITE_ROOT = %(dir)s
+GRAPHITE_ROOT = '%(dir)s'
 TIME_ZONE = 'UTC'
 STATIC_URL = '/static/'
 STATIC_ROOT = '%(dir)s/static'
