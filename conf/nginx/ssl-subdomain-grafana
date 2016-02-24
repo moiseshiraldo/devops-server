@@ -1,0 +1,25 @@
+server {
+    listen 443 ssl;
+    server_name %(server_name)s;
+    
+    ssl_certificate %(certificate_path)s;
+    ssl_certificate_key %(key_path)s;
+
+    access_log /var/log/nginx/grafana.access.log;
+    error_log /var/log/nginx/grafana.error.log;
+    
+    location / {
+        proxy_pass         http://localhost:3000;
+        proxy_set_header   Host $host;
+    }
+    
+    location /.well-known {
+        root /opt/letsencrypt/.well-known
+    }
+}
+
+server {
+    listen 80;
+    server_name %(server_name)s;
+    return 301 https://$host$request_uri;
+}

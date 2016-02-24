@@ -12,11 +12,10 @@ import os
 sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 sys.path.append('../')
 
-from settings import (HOSTS, USER, SSH_CONFIG, GRAPHITE_DIR, GRAFANA_DEB,
-                      GET_GRAFANA)
+from settings import *
 
 system_packages = ("git python-pip nginx libcairo2-dev python-cairo libffi-dev "
-                   "libssl-dev libboost-python-dev fontconfig postgresql "
+                   "libssl-dev libboost-python-dev fontconfig bc postgresql "
                    "postgresql-contrib libpq-dev adduser libfontconfig "
                    "nodejs npm devscripts debhelper python-virtualenv uwsgi "
                    "uwsgi-plugin-python python-psycopg2")
@@ -26,6 +25,8 @@ env.user = USER
 env.dir = GRAPHITE_DIR
 env.activate = "source " + env.dir + "/bin/activate"
 env.use_ssh_config = SSH_CONFIG
+env.ssl_cert_path = SSL_CERTIFICATE_PATH
+env.ssl_key_path = SSL_CERTIFICATE_KEY_PATH
 
 output['everything'] = False
 output['aborts'] = False
@@ -264,20 +265,62 @@ def restart_grafana():
 
 
 def config_webserver():
+    if USE_SSL and USE_LETSENCRYPT:
+        generate_ssl_certificate()
     print("Configuring webserver...", end="\t")
     try:
+        if USE_SUBDOMAINS:
+            if USE_SSL:
+                files.upload_template(
+                    "../conf/nginx/ssl-subdomain-grafana",
+                    "/etc/nginx/sites-available/",
+                    context={
+                        'server_name': SUBDOMAINS['grafana'],
+                        'certificate_path': SSL_CERTIFICATE_PATH,
+                        'key_path': SSL_CERTIFICATE_KEY_PATH,
+                    },
+                    use_sudo=True,
+                )
+                sudo("ln -nsf /etc/nginx/sites-available/ssl-subdomain-grafana "
+                     "/etc/nginx/sites-enabled/")
+            else:
+                files.upload_template(
+                    "../conf/nginx/subdomain-grafana",
+                    "/etc/nginx/sites-available/",
+                    context={'server_name': SUBDOMAINS['grafana']},
+                    use_sudo=True,
+                )
+                sudo("ln -nsf /etc/nginx/sites-available/subdomain-grafana "
+                     "/etc/nginx/sites-enabled/")
+        else:
+            put("../conf/nginx/location-grafana", "/etc/nginx/sites-available/",
+                use_sudo=True)
+            if USE_SSL:
+                files.upload_template(
+                    "../conf/nginx/ssl-server",
+                    "/etc/nginx/sites-available/",
+                    context={
+                        'server_name': DOMAIN,
+                        'certificate_path': env.ssl_cert_path,
+                        'key_path': env.ssl_key_path,
+                    },
+                    use_sudo=True,
+                )
+                sudo("ln -nsf /etc/nginx/sites-available/ssl-server "
+                      "/etc/nginx/sites-enabled/")
+            else:
+                files.upload_template(
+                    "../conf/nginx/server",
+                    "/etc/nginx/sites-available/",
+                    context={'server_name': DOMAIN},
+                    use_sudo=True,
+                )
+                sudo("ln -nsf /etc/nginx/sites-available/server "
+                      "/etc/nginx/sites-enabled/")
         put("../conf/nginx/graphite", "/etc/nginx/sites-available/",
-            use_sudo=True)
-        put("../conf/nginx/location-grafana", "/etc/nginx/sites-available/",
-            use_sudo=True)
-        put("../conf/nginx/server", "/etc/nginx/sites-available/",
-            use_sudo=True)
-        if not files.exists("/etc/nginx/sites-enabled/graphite"):
-            sudo("ln -s /etc/nginx/sites-available/graphite "
-                 "/etc/nginx/sites-enabled/")
-        if not files.exists("/etc/nginx/sites-enabled/server"):
-            sudo("ln -s /etc/nginx/sites-available/server "
-                 "/etc/nginx/sites-enabled/")
+                use_sudo=True)
+        sudo("ln -nsf /etc/nginx/sites-available/graphite "
+              "/etc/nginx/sites-enabled/")
         sudo("rm -f /etc/nginx/sites-enabled/default")
         files.upload_template(
             "../conf/uwsgi/graphite.ini",
@@ -285,9 +328,55 @@ def config_webserver():
             context={'dir': env.dir},
             use_sudo=True,
         )
-        if not files.exists("/etc/uwsgi/apps-enabled/graphite.ini"):
-            sudo("ln -s /etc/uwsgi/apps-available/graphite.ini "
-                 "/etc/uwsgi/apps-enabled/")
+        sudo("ln -nsf /etc/uwsgi/apps-available/graphite.ini "
+             "/etc/uwsgi/apps-enabled/")
+        print_succeed()
+    except AbortException as e:
+        print_fail(e)
+
+
+def generate_ssl_certificate():
+    print("Generating ssl certificate...", end="\t")
+    if USE_SUBDOMAINS:
+        domain = SUBDOMAINS['grafana']
+        file_prefix = "grafana"
+    else:
+        domain = DOMAIN
+        file_prefix = "cert"
+    try:
+        if not files.exists("/etc/letsencrypt/live/%s/fullchain.pem" % domain):
+            if not files.exists("/opt/letsencrypt/"):
+                sudo("git clone https://github.com/letsencrypt/letsencrypt "
+                     "/opt/letsencrypt")
+            sudo("service nginx stop")
+            run("/opt/letsencrypt/letsencrypt-auto certonly --standalone "
+                "--email %(email)s -d %(domain)s" % {
+                    'email': EMAIL, 'domain': domain
+                })
+            files.upload_template(
+                "../conf/letsencrypt/cert-renew.ini",
+                "/opt/letsencrypt/"+file_prefix+"-renew.ini",
+                context={'email': EMAIL, 'domain': domain},
+                use_sudo=True,
+            )
+            files.upload_template(
+                "../conf/letsencrypt/cert-renew.sh",
+                "/opt/letsencrypt/"+file_prefix+"-renew.sh",
+                context={
+                    'renew_conf': file_prefix+"-renew.ini",
+                    'domain': domain,
+                },
+                use_sudo=True,
+            )
+            files.upload_template(
+                "../conf/letsencrypt/crontab",
+                "/opt/letsencrypt/"+file_prefix+"-crontab",
+                context={'renew_script': file_prefix+"-renew.sh"},
+                use_sudo=True,
+            )
+            sudo("crontab /opt/letsencrypt/"+file_prefix+"-crontab")
+        env.ssl_cert_path = "/etc/letsencrypt/live/%s/fullchain.pem" % domain
+        env.ssl_key_path = "/etc/letsencrypt/live/%s/privkey.pem" % domain
         print_succeed()
     except AbortException as e:
         print_fail(e)

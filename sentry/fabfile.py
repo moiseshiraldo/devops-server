@@ -12,11 +12,11 @@ import os
 sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 sys.path.append('../')
 
-from settings import HOSTS, USER, SSH_CONFIG, SENTRY_DIR
+from settings import *
 
 system_packages = ("python-virtualenv python-pip python-setuptools python-dev "
                    "libxslt1-dev libxml2-dev libz-dev libffi-dev libssl-dev "
-                   "libpq-dev libyaml-dev postgresql-contrib supervisor "
+                   "libpq-dev libyaml-dev bc postgresql-contrib supervisor "
                    "redis-server nginx uwsgi uwsgi-plugin-python git")
 
 env.hosts = HOSTS
@@ -24,6 +24,8 @@ env.user = USER
 env.dir = SENTRY_DIR
 env.activate = "source "+env.dir+"/bin/activate"
 env.use_ssh_config = SSH_CONFIG
+env.ssl_cert_path = SSL_CERTIFICATE_PATH
+env.ssl_key_path = SSL_CERTIFICATE_KEY_PATH
 
 output['everything'] = False
 output['aborts'] = False
@@ -185,18 +187,59 @@ def config_supervisor():
 
 
 def config_webserver():
+    if USE_SSL and USE_LETSENCRYPT:
+        generate_ssl_certificate()
     print("Configurint webserver...", end="\t")
     try:
-        put("../conf/nginx/location-sentry", "/etc/nginx/sites-available/",
-            use_sudo=True)
-        put("../conf/nginx/server", "/etc/nginx/sites-available/",
-            use_sudo=True)
-        if not files.exists("/etc/nginx/sites-enabled/server"):
-            sudo("ln -s /etc/nginx/sites-available/server "
-                 "/etc/nginx/sites-enabled/")
+        if USE_SUBDOMAINS:
+            if USE_SSL:
+                files.upload_template(
+                    "../conf/nginx/ssl-subdomain-sentry",
+                    "/etc/nginx/sites-available/",
+                    context={
+                        'server_name': SUBDOMAINS['sentry'],
+                        'certificate_path': SSL_CERTIFICATE_PATH,
+                        'key_path': SSL_CERTIFICATE_KEY_PATH,
+                    },
+                    use_sudo=True,
+                )
+                sudo("ln -nsf /etc/nginx/sites-available/ssl-subdomain-sentry "
+                     "/etc/nginx/sites-enabled/")
+            else:
+                files.upload_template(
+                    "../conf/nginx/subdomain-sentry",
+                    "/etc/nginx/sites-available/",
+                    context={'server_name': SUBDOMAINS['sentry']},
+                    use_sudo=True,
+                )
+                sudo("ln -nsf /etc/nginx/sites-available/subdomain-sentry "
+                     "/etc/nginx/sites-enabled/")
+        else:
+            put("../conf/nginx/location-sentry", "/etc/nginx/sites-available/",
+                use_sudo=True)
+            if USE_SSL:
+                files.upload_template(
+                    "../conf/nginx/ssl-server",
+                    "/etc/nginx/sites-available/",
+                    context={
+                        'server_name': DOMAIN,
+                        'certificate_path': SSL_CERTIFICATE_PATH,
+                        'key_path': SSL_CERTIFICATE_KEY_PATH,
+                    },
+                    use_sudo=True,
+                )
+                sudo("ln -nsf /etc/nginx/sites-available/ssl-server "
+                      "/etc/nginx/sites-enabled/")
+            else:
+                files.upload_template(
+                    "../conf/nginx/server",
+                    "/etc/nginx/sites-available/",
+                    context={'server_name': DOMAIN},
+                    use_sudo=True,
+                )
+                sudo("ln -nsf /etc/nginx/sites-available/server "
+                      "/etc/nginx/sites-enabled/")
         sudo("rm -f /etc/nginx/sites-enabled/default")
-        put("../conf/uwsgi/sentry.ini", "/etc/uwsgi/apps-available/",
-            use_sudo=True)
         files.upload_template(
             "../conf/uwsgi/sentry.ini",
             "/etc/uwsgi/apps-available/",
@@ -206,6 +249,53 @@ def config_webserver():
         if not files.exists("/etc/uwsgi/apps-enabled/sentry.ini"):
             sudo("ln -s /etc/uwsgi/apps-available/sentry.ini "
                  "/etc/uwsgi/apps-enabled/")
+        print_succeed()
+    except AbortException as e:
+        print_fail(e)
+
+
+def generate_ssl_certificate():
+    print("Generating ssl certificate...", end="\t")
+    if USE_SUBDOMAINS:
+        domain = SUBDOMAINS['grafana']
+        file_prefix = "sentry"
+    else:
+        domain = DOMAIN
+        file_prefix = "cert"
+    try:
+        if not files.exists("/etc/letsencrypt/live/%s/fullchain.pem" % domain):
+            if not files.exists("/opt/letsencrypt/"):
+                sudo("git clone https://github.com/letsencrypt/letsencrypt "
+                     "/opt/letsencrypt")
+            sudo("service nginx stop")
+            run("/opt/letsencrypt/letsencrypt-auto certonly --standalone "
+                "--email %(email)s -d %(domain)s" % {
+                    'email': EMAIL, 'domain': domain
+                })
+            files.upload_template(
+                "../conf/letsencrypt/cert-renew.ini",
+                "/opt/letsencrypt/"+file_prefix+"-renew.ini",
+                context={'email': EMAIL, 'domain': domain},
+                use_sudo=True,
+            )
+            files.upload_template(
+                "../conf/letsencrypt/cert-renew.sh",
+                "/opt/letsencrypt/"+file_prefix+"-renew.sh",
+                context={
+                    'renew_conf': file_prefix+"-renew.ini",
+                    'domain': domain,
+                },
+                use_sudo=True,
+            )
+            files.upload_template(
+                "../conf/letsencrypt/crontab",
+                "/opt/letsencrypt/"+file_prefix+"-crontab",
+                context={'renew_script': file_prefix+"-renew.sh"},
+                use_sudo=True,
+            )
+            sudo("crontab /opt/letsencrypt/"+file_prefix+"-crontab")
+        env.ssl_cert_path = "/etc/letsencrypt/live/%s/fullchain.pem" % domain
+        env.ssl_key_path = "/etc/letsencrypt/live/%s/privkey.pem" % domain
         print_succeed()
     except AbortException as e:
         print_fail(e)
