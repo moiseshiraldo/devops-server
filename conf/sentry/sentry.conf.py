@@ -177,7 +177,7 @@ EMAIL_PORT = 25
 EMAIL_USE_TLS = False
 
 # The email address to send on behalf of
-SERVER_EMAIL = 'root@localhost'
+SERVER_EMAIL = 'sentry@localhost'
 
 # If you're using mailgun for inbound mail, set your API key and configure a
 # route to forward to /api/hooks/mailgun/inbound/

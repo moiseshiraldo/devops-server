@@ -206,8 +206,20 @@ def config_graphite():
 
 def config_grafana():
     print("Configuring Grafana...", end="\t")
+    root_url = "http://"
+    if USE_SSL:
+        root_url = "https://"
+    if USE_SUBDOMAINS:
+        root_url += SUBDOMAINS['grafana']
+    else:
+        root_url += DOMAIN + "/grafana"
     try:
-        put("../conf/grafana/grafana.ini", "/etc/grafana/", use_sudo=True)
+        files.upload_template(
+            "../conf/grafana/grafana.ini",
+            "/etc/grafana/",
+            context={'root_url': root_url},
+            use_sudo=True,
+        )
         print_succeed()
     except AbortException as e:
         print_fail(e)
@@ -276,8 +288,8 @@ def config_webserver():
                     "/etc/nginx/sites-available/",
                     context={
                         'server_name': SUBDOMAINS['grafana'],
-                        'certificate_path': SSL_CERTIFICATE_PATH,
-                        'key_path': SSL_CERTIFICATE_KEY_PATH,
+                        'certificate_path': env.ssl_cert_path,
+                        'key_path': env.ssl_key_path,
                     },
                     use_sudo=True,
                 )
@@ -344,37 +356,43 @@ def generate_ssl_certificate():
         domain = DOMAIN
         file_prefix = "cert"
     try:
-        if not files.exists("/etc/letsencrypt/live/%s/fullchain.pem" % domain):
+        key_path = "/etc/letsencrypt/live/%s/fullchain.pem" % domain
+        if not files.exists(key_path, use_sudo=True):
             if not files.exists("/opt/letsencrypt/"):
                 sudo("git clone https://github.com/letsencrypt/letsencrypt "
                      "/opt/letsencrypt")
             sudo("service nginx stop")
+            output['stdout'] = True
             run("/opt/letsencrypt/letsencrypt-auto certonly --standalone "
                 "--email %(email)s -d %(domain)s" % {
                     'email': EMAIL, 'domain': domain
                 })
-            files.upload_template(
-                "../conf/letsencrypt/cert-renew.ini",
-                "/opt/letsencrypt/"+file_prefix+"-renew.ini",
-                context={'email': EMAIL, 'domain': domain},
-                use_sudo=True,
-            )
-            files.upload_template(
-                "../conf/letsencrypt/cert-renew.sh",
-                "/opt/letsencrypt/"+file_prefix+"-renew.sh",
-                context={
-                    'renew_conf': file_prefix+"-renew.ini",
-                    'domain': domain,
-                },
-                use_sudo=True,
-            )
-            files.upload_template(
-                "../conf/letsencrypt/crontab",
-                "/opt/letsencrypt/"+file_prefix+"-crontab",
-                context={'renew_script': file_prefix+"-renew.sh"},
-                use_sudo=True,
-            )
-            sudo("crontab /opt/letsencrypt/"+file_prefix+"-crontab")
+            output['stdout'] = False
+        files.upload_template(
+            "../conf/letsencrypt/cert-renew.ini",
+            "/opt/letsencrypt/"+file_prefix+"-renew.ini",
+            context={'email': EMAIL, 'domain': domain},
+            use_sudo=True,
+        )
+        files.upload_template(
+            "../conf/letsencrypt/cert-renew.sh",
+            "/opt/letsencrypt/"+file_prefix+"-renew.sh",
+            context={
+                'domain': domain,
+                'renew_conf': file_prefix+"-renew.ini",
+                'instance_id': INSTANCE_ID,
+                'open_sg': OPEN_SG,
+                'restricted_sg': RESTRICTED_SG,
+            },
+            use_sudo=True,
+        )
+        files.upload_template(
+            "../conf/letsencrypt/crontab",
+            "/opt/letsencrypt/"+file_prefix+"-crontab",
+            context={'renew_script': file_prefix+"-renew.sh"},
+            use_sudo=True,
+        )
+        run("crontab /opt/letsencrypt/"+file_prefix+"-crontab")
         env.ssl_cert_path = "/etc/letsencrypt/live/%s/fullchain.pem" % domain
         env.ssl_key_path = "/etc/letsencrypt/live/%s/privkey.pem" % domain
         print_succeed()

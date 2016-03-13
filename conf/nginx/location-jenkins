@@ -1,0 +1,9 @@
+location /jenkins {
+    proxy_pass         http://localhost:8081;
+    rewrite  ^/jenkins/(.*)  /$1 break;
+    proxy_set_header   Host $host;
+    proxy_redirect off;
+
+    access_log /var/log/nginx/jenkins.access.log;
+    error_log /var/log/nginx/jenkins.error.log;
+}

@@ -2,7 +2,6 @@ from __future__ import print_function
 
 from fabric.api import run, sudo, env, cd, prefix, put
 from fabric.contrib import files
-from contextlib import contextmanager as customcontextmanager
 from fabric.state import output
 from fabric.colors import green, red
 
@@ -14,29 +13,17 @@ sys.path.append('../')
 
 from settings import *
 
-system_packages = ("python-virtualenv python-pip python-setuptools python-dev "
-                   "libxslt1-dev libxml2-dev libz-dev libffi-dev libssl-dev "
-                   "libpq-dev libyaml-dev bc postgresql-contrib supervisor "
-                   "redis-server nginx uwsgi uwsgi-plugin-python git")
+system_packages = ("openjdk-7-jre openjdk-7-jdk")
 
 env.hosts = HOSTS
 env.user = USER
-env.dir = SENTRY_DIR
-env.activate = "source "+env.dir+"/bin/activate"
+env.dir = JENKINS_DIR
 env.use_ssh_config = SSH_CONFIG
 env.ssl_cert_path = SSL_CERTIFICATE_PATH
 env.ssl_key_path = SSL_CERTIFICATE_KEY_PATH
 
 output['everything'] = False
 output['aborts'] = False
-
-
-@customcontextmanager
-def virtualenv():
-    with cd(env.dir):
-        with prefix(env.activate):
-            yield
-
 
 def print_succeed():
     print("[", end="")
@@ -59,16 +46,8 @@ env.abort_exception = AbortException
 
 def full_installation():
     install_system_packages()
-    create_virtualenv()
-    install_sentry()
-    config_sentry()
-    create_db_user()
-    create_db()
-    config_db()
-    sync_db()
-    config_supervisor()
+    install_jenkins()
     config_webserver()
-    restart_redis()
     restart_webserver()
 
 
@@ -76,7 +55,6 @@ def install_system_packages():
     print("Installing system packages. This could take a few minutes...",
           end="\t")
     try:
-        sudo("apt-add-repository -y ppa:chris-lea/redis-server")
         sudo("apt-get update")
         sudo("apt-get -y install %s" % system_packages)
         print_succeed()
@@ -84,103 +62,29 @@ def install_system_packages():
         print_fail(e)
 
 
-def create_virtualenv():
-    print("Creating virtual environment...", end="\t")
+def install_jenkins():
+    print("Installing Jenkins...", end='\t')
+    configure_jenkins()
     try:
-        run("virtualenv "+env.dir)
+        sudo("wget -q -O - https://jenkins-ci.org/debian/jenkins-ci.org.key | "
+             "sudo apt-key add -")
+        sudo("sudo sh -c 'echo deb http://pkg.jenkins-ci.org/debian binary/ > "
+             "/etc/apt/sources.list.d/jenkins.list'")
+        sudo("apt-get update")
+        sudo("apt-get install jenkins")
         print_succeed()
     except AbortException as e:
         print_fail(e)
 
-
-def install_sentry():
-    print("Installing sentry. This could take a few minutes...", end="\t")
-    try:
-        with virtualenv():
-            run("pip install -U sentry")
-            run("mkdir %s/conf" % env.dir)
-            run("sentry init %s/conf" % env.dir)
-        print_succeed()
-    except AbortException as e:
-        print_fail(e)
-
-
-def config_sentry():
-    print("Configuring sentry...", end="\t")
-    try:
-        put("../conf/sentry/sentry.conf.py", "%s/conf/" % env.dir)
-        print_succeed()
-    except AbortException as e:
-        print_fail(e)
-
-
-def create_db_user():
-    print("Creating database user...", end="\t")
-    query = "SELECT 1 FROM pg_roles WHERE rolname='dashboard';"
-    try:
-        if not sudo("psql -tAc \""+query+"\"", user="postgres"):
-            sudo("psql -c \"CREATE USER dashboard WITH PASSWORD 'dashboard';\"",
-                 user="postgres")
-        print_succeed()
-    except AbortException as e:
-        print_fail(e)
-
-
-def db_exists(name):
-    query = "SELECT 1 FROM pg_database WHERE datname = '%s';" % name
-    return sudo("psql -tAc \""+query+"\"", user="postgres")
-
-
-def create_db():
-    print("Creating database...", end="\t")
-    try:
-        if not db_exists("sentry"):
-            sudo("psql -c 'CREATE DATABASE sentry;'", user="postgres")
-        sudo("psql -c 'GRANT ALL PRIVILEGES ON DATABASE sentry TO dashboard;'",
-             user="postgres")
-        print_succeed()
-    except AbortException as e:
-        print_fail(e)
-
-
-def config_db():
-    print("Configuring PostgreSQL...", end="\t")
-    try:
-        put("../conf/postgresql/pg_hba.conf", "/etc/postgresql/9.3/main/",
-            use_sudo=True)
-        sudo("service postgresql restart")
-        print_succeed()
-    except AbortException as e:
-        print_fail(e)
-
-
-def sync_db():
-    print("Synchronizing database...", end="\t")
-    try:
-        with virtualenv():
-            output['stdout'] = True
-            run("SENTRY_CONF=%s/conf sentry upgrade" % env.dir)
-            output['stdout'] = False
-        print_succeed()
-    except AbortException as e:
-        print_fail(e)
-
-
-def create_user():
-    with virtualenv():
-        run("SENTRY_CONF=%s/conf sentry createuser" % env.dir)
-
-
-def config_supervisor():
-    print("Configuring supervisor for sentry-worker...", end="\t")
+def configure_jenkins():
+    print("Configuring Jenkins...", end="\t")
     try:
         files.upload_template(
-            "../conf/supervisor/sentry.conf",
-            "/etc/supervisor/conf.d/",
-            context={'dir': env.dir, 'user': env.user},
+            "../conf/jenkins/jenkins",
+            "/etc/default/",
+            context={'jenkins_dir': env.dir},
             use_sudo=True,
         )
-        sudo("service supervisor restart")
         print_succeed()
     except AbortException as e:
         print_fail(e)
@@ -194,28 +98,28 @@ def config_webserver():
         if USE_SUBDOMAINS:
             if USE_SSL:
                 files.upload_template(
-                    "../conf/nginx/ssl-subdomain-sentry",
+                    "../conf/nginx/ssl-subdomain-jenkins",
                     "/etc/nginx/sites-available/",
                     context={
-                        'server_name': SUBDOMAINS['sentry'],
+                        'server_name': SUBDOMAINS['jenkins'],
                         'certificate_path': env.ssl_cert_path,
                         'key_path': env.ssl_key_path,
                     },
                     use_sudo=True,
                 )
-                sudo("ln -nsf /etc/nginx/sites-available/ssl-subdomain-sentry "
+                sudo("ln -nsf /etc/nginx/sites-available/ssl-subdomain-jenkins "
                      "/etc/nginx/sites-enabled/")
             else:
                 files.upload_template(
-                    "../conf/nginx/subdomain-sentry",
+                    "../conf/nginx/subdomain-jenkins",
                     "/etc/nginx/sites-available/",
-                    context={'server_name': SUBDOMAINS['sentry']},
+                    context={'server_name': SUBDOMAINS['jenkins']},
                     use_sudo=True,
                 )
-                sudo("ln -nsf /etc/nginx/sites-available/subdomain-sentry "
+                sudo("ln -nsf /etc/nginx/sites-available/subdomain-jenkins "
                      "/etc/nginx/sites-enabled/")
         else:
-            put("../conf/nginx/location-sentry", "/etc/nginx/sites-available/",
+            put("../conf/nginx/location-jenkins", "/etc/nginx/sites-available/",
                 use_sudo=True)
             if USE_SSL:
                 files.upload_template(
@@ -239,16 +143,11 @@ def config_webserver():
                 )
                 sudo("ln -nsf /etc/nginx/sites-available/server "
                       "/etc/nginx/sites-enabled/")
+        put("../conf/nginx/graphite", "/etc/nginx/sites-available/",
+                use_sudo=True)
+        sudo("ln -nsf /etc/nginx/sites-available/graphite "
+              "/etc/nginx/sites-enabled/")
         sudo("rm -f /etc/nginx/sites-enabled/default")
-        files.upload_template(
-            "../conf/uwsgi/sentry.ini",
-            "/etc/uwsgi/apps-available/",
-            context={'dir': env.dir},
-            use_sudo=True,
-        )
-        if not files.exists("/etc/uwsgi/apps-enabled/sentry.ini"):
-            sudo("ln -s /etc/uwsgi/apps-available/sentry.ini "
-                 "/etc/uwsgi/apps-enabled/")
         print_succeed()
     except AbortException as e:
         print_fail(e)
@@ -257,8 +156,8 @@ def config_webserver():
 def generate_ssl_certificate():
     print("Generating ssl certificate...", end="\t")
     if USE_SUBDOMAINS:
-        domain = SUBDOMAINS['sentry']
-        file_prefix = "sentry"
+        domain = SUBDOMAINS['jenkins']
+        file_prefix = "jenkins"
     else:
         domain = DOMAIN
         file_prefix = "cert"
@@ -269,12 +168,16 @@ def generate_ssl_certificate():
                 sudo("git clone https://github.com/letsencrypt/letsencrypt "
                      "/opt/letsencrypt")
             sudo("service nginx stop")
+            if OPEN_SG:
+                change_security_groups(OPEN_SG)
             output['stdout'] = True
             run("/opt/letsencrypt/letsencrypt-auto certonly --standalone "
                 "--email %(email)s -d %(domain)s" % {
                     'email': EMAIL, 'domain': domain
                 })
             output['stdout'] = False
+            if RESTRICTED_SG:
+                change_security_groups(RESTRICTED_SG)
         files.upload_template(
             "../conf/letsencrypt/cert-renew.ini",
             "/opt/letsencrypt/"+file_prefix+"-renew.ini",
@@ -285,8 +188,8 @@ def generate_ssl_certificate():
             "../conf/letsencrypt/cert-renew.sh",
             "/opt/letsencrypt/"+file_prefix+"-renew.sh",
             context={
-                'renew_conf': file_prefix+"-renew.ini",
                 'domain': domain,
+                'renew_conf': file_prefix+"-renew.ini",
                 'instance_id': INSTANCE_ID,
                 'open_sg': OPEN_SG,
                 'restricted_sg': RESTRICTED_SG,
@@ -307,19 +210,16 @@ def generate_ssl_certificate():
         print_fail(e)
 
 
-def restart_redis():
-    print("Restarting redis server...", end="\t")
-    try:
-        sudo("service redis-server restart")
-        print_succeed()
-    except AbortException as e:
-        print_fail(e)
+def change_security_groups(security_groups):
+    run("aws ec2 modify-instance-attribute --instance-id %(instance_id)s "
+        "--groups %(sg)s" % {'instance_id': INSTANCE_ID, 'sg': security_groups})
 
 
 def restart_webserver():
     print("Restarting webserver...", end="\t")
     try:
-        sudo("service uwsgi restart")
+        sudo("service jenkins restart")
         sudo("service nginx restart")
+        print_succeed()
     except AbortException as e:
         print_fail(e)

@@ -6,11 +6,12 @@ server {
     ssl_certificate_key %(key_path)s;
 
     location /.well-known {
-        root /opt/letsencrypt/.well-known
+        root /opt/letsencrypt/;
+        allow all;
     }
-    
+
     include /etc/nginx/sites-available/location-*;
-} 
+}
 
 server {
     listen 80;
