@@ -18,6 +18,9 @@ A Debian-based system for the server, an SSH connection and Fabric. The installa
 | [Jenkins](https://github.com/jenkinsci/jenkins)         | Continuous integration    | 8081 TCP        | JENKINS_DIR      |
 | [Nginx](http://nginx.org/)           | Web/proxy server          | 80/443 TCP      | /etc/nginx       |
 
+### Diagram
+![Stack diagram](/stack.png?raw=true)
+
 ## Configuration
 
 The configuration previous to the installation is done on the `settings.py` file. You must set the host and user to make the SSH connection to the server and the directories to install the different components. Note that the user must have sudo privileges on the server and write permission to create the directories.
@@ -29,9 +32,6 @@ You also have to set the domain name for the server and whether nginx will use S
 Go to the directory of the component you want to install and execute the `full_installation` fabric command. For example, to install the monitoring dashboard:
 
 ```
-cd dashboard
-fab full_installation
+$ cd dashboard
+$ fab full_installation
 ```
-
-
-
